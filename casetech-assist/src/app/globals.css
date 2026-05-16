@@ -1,0 +1,73 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@theme {
+  --color-background: #020b1a;
+  --color-foreground: #f8fafc;
+  --color-card: #081b33;
+  --color-card-foreground: #f8fafc;
+  --color-popover: #081b33;
+  --color-popover-foreground: #f8fafc;
+  --color-primary: #1e88ff;
+  --color-primary-foreground: #f8fafc;
+  --color-secondary: #0b2442;
+  --color-secondary-foreground: #f8fafc;
+  --color-muted: #0b2442;
+  --color-muted-foreground: #94a3b8;
+  --color-accent: #3ba7ff;
+  --color-accent-foreground: #020b1a;
+  --color-destructive: #fb7185;
+  --color-border: #1e3a5f;
+  --color-input: #123050;
+  --color-ring: #3ba7ff;
+  --color-sidebar: #031427;
+  --color-sidebar-foreground: #f8fafc;
+  --color-sidebar-primary: #1e88ff;
+  --color-sidebar-primary-foreground: #f8fafc;
+  --color-sidebar-accent: #0b2442;
+  --color-sidebar-accent-foreground: #f8fafc;
+  --color-sidebar-border: #1e3a5f;
+  --color-sidebar-ring: #3ba7ff;
+  --color-success: #38bdf8;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.625rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+html {
+  background: #020b1a;
+}
+
+body {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at top left, rgba(30, 136, 255, 0.16), transparent 34rem),
+    linear-gradient(135deg, #020b1a 0%, #061226 54%, #020b1a 100%);
+  color: #f8fafc;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+::selection {
+  background: rgba(59, 167, 255, 0.32);
+  color: #f8fafc;
+}
+
+.technical-grid {
+  background-image:
+    linear-gradient(rgba(59, 167, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(59, 167, 255, 0.08) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
