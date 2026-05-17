@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Google service account key file (if used for deployment or other purposes)
+google-service-account.json
