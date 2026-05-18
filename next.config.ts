@@ -1,7 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  serverExternalPackages: [
+    "@google-cloud/discoveryengine",
+    "@google-cloud/storage",
+    "google-auth-library",
+    "google-gax",
+  ],
 };
 
 export default nextConfig;

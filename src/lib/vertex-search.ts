@@ -1,13 +1,30 @@
 import "server-only";
 
 import { SearchServiceClient, protos } from "@google-cloud/discoveryengine";
-import type { SearchResponse, SearchResult } from "@/lib/search-types";
+import type { SearchFilters, SearchResponse, SearchResult, SearchSource } from "@/lib/search-types";
 
 type StructLike = {
   fields?: Record<string, unknown> | null;
 };
 
 type SearchResultProto = protos.google.cloud.discoveryengine.v1.SearchResponse.ISearchResult;
+type SummaryReference = {
+  title?: string | null;
+  document?: string | null;
+  uri?: string | null;
+  chunkContents?: Array<{
+    content?: string | null;
+    pageIdentifier?: string | null;
+  }> | null;
+};
+
+type SummaryCitation = {
+  sources?: SummaryCitationSource[] | null;
+};
+
+type SummaryCitationSource = {
+  referenceIndex?: number | string | { toNumber?: () => number } | null;
+};
 
 const FALLBACK_VALUE = "Unspecified";
 
@@ -102,6 +119,21 @@ function firstNumber(...values: unknown[]): number | undefined {
   return undefined;
 }
 
+function parsePageNumber(value: unknown): number | undefined {
+  const direct = firstNumber(value);
+
+  if (typeof direct === "number") {
+    return direct;
+  }
+
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const match = value.match(/\d+/);
+  return match ? firstNumber(match[0]) : undefined;
+}
+
 function extractSnippet(data: Record<string, unknown>): string {
   const snippets = data.snippets;
 
@@ -155,6 +187,14 @@ function extractRelevanceScore(result: SearchResultProto): number | undefined {
   return firstNumber(relevanceScore, semanticSimilarity);
 }
 
+function extractDocumentIdFromName(documentName?: string | null): string | undefined {
+  if (!documentName) {
+    return undefined;
+  }
+
+  return documentName.split("/").pop() || undefined;
+}
+
 function normalizeResult(result: SearchResultProto): SearchResult {
   const document = result.document;
   const structData = structToRecord(document?.structData);
@@ -166,6 +206,7 @@ function normalizeResult(result: SearchResultProto): SearchResult {
     `/documents/${document?.id ?? result.id ?? "unknown"}`;
 
   return {
+    id: document?.id ?? result.id ?? undefined,
     title:
       firstString(data.title, data.name, data.documentTitle, data.document_title, document?.id) ??
       "Untitled document",
@@ -178,7 +219,7 @@ function normalizeResult(result: SearchResultProto): SearchResult {
     model: firstString(data.model, data.modelNumber, data.model_number, data.equipmentModel) ?? FALLBACK_VALUE,
     snippet: extractSnippet(data),
     sourceUrl,
-    pageNumber: firstNumber(data.pageNumber, data.page_number, data.page, data.pageIdentifier),
+    pageNumber: parsePageNumber(data.pageNumber ?? data.page_number ?? data.page ?? data.pageIdentifier),
     relevanceScore: extractRelevanceScore(result),
   };
 }
@@ -192,7 +233,128 @@ function extractRecommendedSteps(summary: string): string[] {
     .slice(0, 5);
 }
 
-export async function searchVertexDocuments(query: string): Promise<SearchResponse | null> {
+function extractFollowUpQuestions(summary: string): string[] {
+  if (/cassette|jam|dispenser/i.test(summary)) {
+    return [
+      "Which cassette or dispenser lane reported the fault?",
+      "Does the issue repeat after clearing media and cleaning sensors?",
+      "What error code appears in diagnostics or the event log?",
+    ];
+  }
+
+  return [
+    "What is the exact manufacturer and model?",
+    "What error code or device event was logged?",
+    "Which repair steps have already been attempted?",
+  ];
+}
+
+function escapeFilterValue(value: string) {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function buildFilter(filters?: SearchFilters): string | undefined {
+  if (!filters) {
+    return undefined;
+  }
+
+  const entries = [
+    ["equipmentType", filters.equipmentType],
+    ["manufacturer", filters.manufacturer],
+    ["model", filters.model],
+    ["documentType", filters.documentType],
+  ].filter((entry): entry is [string, string] => Boolean(entry[1]?.trim()));
+
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return entries.map(([field, value]) => `${field}: ANY("${escapeFilterValue(value)}")`).join(" AND ");
+}
+
+function getReferenceIndex(value: SummaryCitationSource) {
+  const referenceIndex = value.referenceIndex;
+
+  if (typeof referenceIndex === "number") {
+    return referenceIndex;
+  }
+
+  if (typeof referenceIndex === "string") {
+    return firstNumber(referenceIndex);
+  }
+
+  if (referenceIndex && typeof referenceIndex === "object" && referenceIndex.toNumber) {
+    return referenceIndex.toNumber();
+  }
+
+  return undefined;
+}
+
+function citationSourcesFromSummary(
+  response: protos.google.cloud.discoveryengine.v1.ISearchResponse | undefined,
+  documents: SearchResult[],
+): SearchSource[] {
+  const summaryWithMetadata = response?.summary?.summaryWithMetadata;
+  const references = (summaryWithMetadata?.references ?? []) as SummaryReference[];
+  const citations = (summaryWithMetadata?.citationMetadata?.citations ?? []) as SummaryCitation[];
+  const citedReferenceIndexes = new Set<number>();
+
+  citations.forEach((citation) => {
+    citation.sources?.forEach((source) => {
+      const index = getReferenceIndex(source);
+
+      if (typeof index === "number" && index >= 0) {
+        citedReferenceIndexes.add(index);
+      }
+    });
+  });
+
+  const sources = Array.from(citedReferenceIndexes)
+    .map<SearchSource | null>((index) => {
+      const reference = references[index];
+      const firstChunk = reference?.chunkContents?.[0];
+      const matchedDocument = documents.find(
+        (document) =>
+          document.sourceUrl === reference?.uri ||
+          document.id === extractDocumentIdFromName(reference?.document) ||
+          document.title === reference?.title,
+      );
+
+      if (!reference && !matchedDocument) {
+        return null;
+      }
+
+      return {
+        title: reference?.title || matchedDocument?.title || "Internal document",
+        type: "internal_document" as const,
+        uri:
+          reference?.uri ||
+          matchedDocument?.sourceUrl ||
+          `/documents/${extractDocumentIdFromName(reference?.document) ?? "unknown"}`,
+        pageNumber:
+          parsePageNumber(firstChunk?.pageIdentifier) ??
+          matchedDocument?.pageNumber,
+        snippet:
+          firstChunk?.content?.trim() ||
+          matchedDocument?.snippet ||
+          "Internal source cited by Vertex AI Search.",
+      };
+    });
+  const filteredSources: SearchSource[] = sources.filter(
+    (source): source is SearchSource => source !== null,
+  );
+
+  if (filteredSources.length > 0) {
+    return filteredSources;
+  }
+
+  return [];
+}
+
+export async function searchVertexDocuments(
+  query: string,
+  filters?: SearchFilters,
+): Promise<SearchResponse | null> {
   const config = getConfig();
 
   if (!config) {
@@ -207,42 +369,60 @@ export async function searchVertexDocuments(query: string): Promise<SearchRespon
   const client = new SearchServiceClient({ apiEndpoint });
   const servingConfig = `projects/${config.projectId}/locations/${config.location}/collections/default_collection/dataStores/${config.dataStoreId}/servingConfigs/${config.servingConfigId}`;
 
-  const [results, , response] = await client.search({
-    servingConfig,
-    query,
-    pageSize: 10,
-    contentSearchSpec: {
-      snippetSpec: {
-        returnSnippet: true,
+  const [results, , response] = await client.search(
+    {
+      servingConfig,
+      query,
+      pageSize: 10,
+      filter: buildFilter(filters),
+      contentSearchSpec: {
+        snippetSpec: {
+          returnSnippet: true,
+        },
+        extractiveContentSpec: {
+          maxExtractiveAnswerCount: 1,
+          maxExtractiveSegmentCount: 1,
+        },
+        summarySpec: {
+          summaryResultCount: 5,
+          includeCitations: true,
+          ignoreAdversarialQuery: true,
+          ignoreJailBreakingQuery: true,
+        },
       },
-      extractiveContentSpec: {
-        maxExtractiveAnswerCount: 1,
-        maxExtractiveSegmentCount: 1,
-      },
-      summarySpec: {
-        summaryResultCount: 5,
-        includeCitations: true,
-        ignoreAdversarialQuery: true,
-        ignoreJailBreakingQuery: true,
+      relevanceScoreSpec: {
+        returnRelevanceScore: true,
       },
     },
-    relevanceScoreSpec: {
-      returnRelevanceScore: true,
+    {
+      autoPaginate: false,
     },
-  });
+  );
 
+  const documents = results.map(normalizeResult);
   const aiSummary =
+    response?.summary?.summaryWithMetadata?.summary?.trim() ||
     response?.summary?.summaryText?.trim() ||
     `Found ${results.length} relevant documents for "${query}".`;
   const recommendedSteps = extractRecommendedSteps(aiSummary);
+  const sources = citationSourcesFromSummary(response, documents);
+  const confidence =
+    documents.reduce((highest, result) => Math.max(highest, result.relevanceScore ?? 0), 0) ||
+    (sources.length > 0 ? 0.72 : 0.3);
 
   return {
+    mode: "internal",
+    answer: aiSummary,
+    confidence,
+    followUpQuestions: extractFollowUpQuestions(aiSummary),
+    sources,
+    documents,
     source: "google",
     aiSummary,
     recommendedSteps:
       recommendedSteps.length > 0
         ? recommendedSteps
         : ["Review the highest-ranked source documents and verify steps against official manuals."],
-    results: results.map(normalizeResult),
+    results: documents,
   };
 }

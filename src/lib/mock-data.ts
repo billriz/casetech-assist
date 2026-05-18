@@ -23,6 +23,7 @@ import {
 export const navigationItems = [
   { label: "Home", href: "/", icon: Home },
   { label: "Search", href: "/search", icon: Search },
+  { label: "Documents", href: "/documents", icon: FileText },
   { label: "Upload Document", href: "/upload", icon: UploadCloud },
   { label: "My Favorites", href: "#", icon: Heart },
   { label: "Recent", href: "#", icon: Clock3 },

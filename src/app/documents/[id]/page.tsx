@@ -1,8 +1,10 @@
+import { notFound } from "next/navigation";
 import { AppShell } from "@/components/casetech/AppShell";
 import { DocumentViewerShell } from "@/components/casetech/DocumentViewerShell";
 import { getDocumentById, getRelatedDocuments } from "@/lib/documents";
 
-type NcrDocumentPageProps = {
+type DocumentPageProps = {
+  params: Promise<{ id: string }>;
   searchParams: Promise<{ page?: string }>;
 };
 
@@ -13,14 +15,12 @@ function parsePageNumber(value?: string) {
   return Number.isInteger(page) && page > 0 ? page : undefined;
 }
 
-export default async function DocumentViewerPage({ searchParams }: NcrDocumentPageProps) {
-  const [query, document] = await Promise.all([
-    searchParams,
-    getDocumentById("ncr-6622-service-manual"),
-  ]);
+export default async function DocumentPage({ params, searchParams }: DocumentPageProps) {
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const document = await getDocumentById(id);
 
   if (!document) {
-    return null;
+    notFound();
   }
 
   return (

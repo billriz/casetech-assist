@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { ArrowUpRight, FileText } from "lucide-react";
+import { ArrowUpRight, FileText, FolderOpen } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
+import { findMockDocumentForSearchResult, getDocumentIdFromPath } from "@/lib/mock-documents";
 import type { SearchResult } from "@/lib/search-types";
 
 export function DocumentResultCard({
+  id,
   title,
   documentType,
   equipmentType,
@@ -17,6 +19,22 @@ export function DocumentResultCard({
 }: SearchResult) {
   const matchPercent =
     typeof relevanceScore === "number" ? Math.round(relevanceScore * 100) : undefined;
+  const matchedDocument = findMockDocumentForSearchResult({ id, title, sourceUrl });
+  const sourceDocumentId = getDocumentIdFromPath(sourceUrl);
+  const documentHref = new URLSearchParams();
+
+  if (typeof pageNumber === "number") {
+    documentHref.set("page", String(pageNumber));
+  }
+
+  const openDocumentPath =
+    matchedDocument || sourceDocumentId
+      ? `/documents/${matchedDocument?.id ?? sourceDocumentId}`
+      : "/documents";
+  const openDocumentQuery = documentHref.toString();
+  const openDocumentHref = openDocumentQuery
+    ? `${openDocumentPath}?${openDocumentQuery}`
+    : openDocumentPath;
 
   return (
     <Card className="p-5">
@@ -44,13 +62,22 @@ export function DocumentResultCard({
             </p>
           </div>
         </div>
-        <Link
-          href={sourceUrl}
-          className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-[0_0_24px_rgba(30,136,255,0.24)] transition hover:bg-[#3BA7FF] sm:ml-4"
-        >
-          Source
-          <ArrowUpRight className="size-4" />
-        </Link>
+        <div className="flex shrink-0 flex-wrap gap-2 sm:ml-4 sm:flex-col">
+          <Link
+            href={openDocumentHref}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-5 text-sm font-semibold text-primary-foreground shadow-[0_0_24px_rgba(30,136,255,0.24)] transition hover:bg-[#3BA7FF]"
+          >
+            <FolderOpen className="size-4" />
+            Open Document
+          </Link>
+          <Link
+            href={sourceUrl}
+            className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-border bg-secondary px-5 text-sm font-semibold text-foreground transition hover:border-accent hover:bg-[#0E2A4C]"
+          >
+            Source
+            <ArrowUpRight className="size-4" />
+          </Link>
+        </div>
       </div>
     </Card>
   );
